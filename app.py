@@ -143,11 +143,6 @@ def update_employee():
               if key not in form_data:
                  form_data[key] = value
         print(form_data)
-     
-        update_data = {key: value for key, value in form_data.items() if value}
-        for key, value in update_data.items():
-            setattr(employee, key, value)
-        
         db.session.commit()      
         return "Data update successfully"
 
