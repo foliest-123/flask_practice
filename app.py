@@ -19,7 +19,7 @@ conn = psycopg2.connect(database="sample_test",
                     password="1234",  
                     host="localhost", port="5432") 
 
-app.config['SQLALCHEMY_DATABASE_URI'] =f'postgresql+psycopg2://{username}:{password}@localhost/{db}'
+app.config['SQLALCHEMY_DATABASE_URI'] = f'postgresql://{username}:{password}@localhost/{db}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False  # Optional but recommended for performance
 
 db = SQLAlchemy(app)
@@ -117,26 +117,29 @@ def add_employee():
         db.session.add(new_employee)
         db.session.commit()
         return jsonify("Data insert successfully")
-    except Exception as e:
-        # Handle the exception here
-        error_message = "An error occurred: {}".format(str(e))
-        # You can log the error or handle it in a way suitable for your application
+    except SQLAlchemyError as e:
+        error_message = f"Error retrieving employees: {str(e)}"
         return (error_message)
 
 @app.route('/update_employee', methods=["GET"])
 def update_employee():
+    try:
+        form_data = request.get_json() 
+        employee = Employee.query.filter(Employee.employee_id == form_data['id']).first()
+        if not employee:
+            return jsonify({'message': 'Employee not found'}), 404
+     
+        update_data = {key: value for key, value in form_data.items()}
+        for key, value in update_data.items():
+            setattr(employee, key, value)
+        
+        db.session.commit()
+        
+        return jsonify({'success': 'data updated successfully'})
 
-    form_data = request.get_json() 
-    employee = Employee.query.filter(Employee.employee_id == form_data['id']).first()
-    if not employee:
-        return jsonify({'message': 'Employee not found'}), 404
- 
-    update_data = {key: value for key, value in form_data.items()}
-    for key, value in update_data.items():
-     setattr(employee, key, value)
-    db.session.commit()
-    
-    return jsonify({'success': 'data updated successfully'})
+    except SQLAlchemyError as e:
+        db.session.rollback()  # Rollback changes in case of an error
+        return jsonify({'error': str(e)}), 500  
 
 
 @app.route('/delete_employee', methods=["GET"])
