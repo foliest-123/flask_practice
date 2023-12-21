@@ -1,7 +1,13 @@
 from flask import Flask , render_template , request , jsonify, redirect , url_for
 import psycopg2 
-from sqlalchemy import create_engine
 from flask_sqlalchemy import SQLAlchemy 
+from sqlalchemy.exc import SQLAlchemyError
+import os
+
+db = os.getenv('DB')
+username = os.getenv('DB_USER')
+password = os.getenv('DB_PASSWORD')
+
 app = Flask(__name__)
 
 @app.route("/")
@@ -13,7 +19,7 @@ conn = psycopg2.connect(database="sample_test",
                     password="1234",  
                     host="localhost", port="5432") 
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql+psycopg2://postgres:1234@localhost/sample_test'
+app.config['SQLALCHEMY_DATABASE_URI'] =f'postgresql+psycopg2://{username}:{password}@localhost/{db}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False  # Optional but recommended for performance
 
 db = SQLAlchemy(app)
@@ -75,79 +81,88 @@ class Employee(db.Model):
         self.department = department
         self.salary = salary
         self.hire_date = hire_date
+
+
 @app.route('/employees', methods=['GET'])
 def get_employees():
-    employees = Employee.query.all()
-    result = []
-    for employee in employees:
-        result.append({
-            'id': employee.employee_id,
-            'first_name': employee.first_name,
-            'last_name': employee.last_name,
-            'email': employee.email,
-            'department': employee.department,
-            'salary': float(employee.salary),
-            'hire_date': str(employee.hire_date)
-        })
-    return render_template('/addemployees.html' , result = result)
-
-@app.route('/add_employee', methods=["POST"])
+    try:
+        employees = Employee.query.all()
+        result = []
+        for employee in employees:
+            result.append({
+                'id': employee.employee_id,
+                'first_name': employee.first_name,
+                'last_name': employee.last_name,
+                'email': employee.email,
+                'department': employee.department,
+                'salary': float(employee.salary),
+                'hire_date': str(employee.hire_date)
+            })
+        return result
+    except SQLAlchemyError as e:
+        error_message = f"Error retrieving employees: {str(e)}"
+        return (error_message)
+@app.route('/add_employee', methods=["GET"])
 def add_employee():
+    values = request.get_json()
+    try:
         new_employee = Employee(
-            first_name=request.form.get('firstname'),
-            last_name=request.form.get('lastname'),
-            email=request.form.get('email'),
-            department=request.form.get('department'),
-            salary=request.form.get('salary'),
-            hire_date=request.form.get('hiredate')
+            first_name=values['firstname'],
+            last_name=values['lastname'],
+            email=values['email'],
+            department=values['department'],
+            salary=values['salary'],
+            hire_date=values['hiredate']
         )
         db.session.add(new_employee)
         db.session.commit()
-        return redirect(url_for('get_employees'))
+        return jsonify("Data insert successfully")
+    except Exception as e:
+        # Handle the exception here
+        error_message = "An error occurred: {}".format(str(e))
+        # You can log the error or handle it in a way suitable for your application
+        return (error_message)
 
-@app.route('/update_employee', methods=["POST"])
+@app.route('/update_employee', methods=["GET"])
 def update_employee():
 
-    form_data = request.form.to_dict() 
+    form_data = request.get_json() 
     employee = Employee.query.filter(Employee.employee_id == form_data['id']).first()
-
     if not employee:
         return jsonify({'message': 'Employee not found'}), 404
  
-    # Filter out the keys that are not present or have empty values
     update_data = {key: value for key, value in form_data.items()}
-    previous_value = Employee.query.get(Employee.employee_id == form_data['id']).first()
-    # Update only the provided fields
-    print(update_data)
     for key, value in update_data.items():
      setattr(employee, key, value)
-    # Check for empty values in updated data and copy from employee if empty
-    for key, value in update_data.items():
-       if not value:
-        setattr(employee, key, getattr(employee, key)) 
-    print(previous_value) # Copy from employee if value is empty
     db.session.commit()
     
-    return redirect(url_for('get_employees'))
+    return jsonify({'success': 'data updated successfully'})
 
 
-@app.route('/delete_employee' , methods=["POST"])
+@app.route('/delete_employee', methods=["GET"])
 def delete_employee():
-    search_id = request.form.get('search_id')
-    search_name = request.form.get('search_name')
-    employee_to_delete = (
-        Employee.query.filter(
-            (Employee.employee_id == search_id) |
-            (Employee.first_name == search_name) |
-            (Employee.last_name == search_name)
-        ).first()
-    )
-    if employee_to_delete:
+    try:
+        delete_values = request.get_json()
+
+        employee_to_delete = (
+            Employee.query.filter(
+                (Employee.employee_id == delete_values['id']) &
+                (Employee.email == delete_values['email'])
+            ).first()
+        )
+
         db.session.delete(employee_to_delete)
         db.session.commit()
-    return redirect(url_for('get_employees'))
+        return "Data deleted successfully"
 
+    except SQLAlchemyError as e:
+        # Handle the SQLAlchemyError exception here
+        db.session.rollback()  # Roll back changes in case of an error
+        error_message = "An error occurred: {}".format(str(e))
+        # You can log the error or handle it in a way suitable for your application
+        return (error_message)
 
 
 if __name__ == "__main__":
     app.run()
+
