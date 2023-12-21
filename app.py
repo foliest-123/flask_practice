@@ -125,20 +125,31 @@ def add_employee():
 def update_employee():
         form_data = request.get_json() 
         employee_id  = form_data['id']
-        employee_name = form_data['firstname']
-        employee = Employee.query.filter_by(employee_id,employee_name).first()
+        employee = Employee.query.get(employee_id)
+        
+        employee_values= {
+               'id': employee.employee_id,
+                'first_name': employee.first_name,
+                'last_name': employee.last_name,
+                'email': employee.email,
+                'department': employee.department,
+                'salary': float(employee.salary),
+                'hire_date': str(employee.hire_date)
+        }
         if not employee:
             return jsonify({'message': 'Employee not found'}), 404
         else:
-            print(employee)
+            for key, value in employee_values.items():
+              if key not in form_data:
+                 form_data[key] = value
+        print(form_data)
      
         update_data = {key: value for key, value in form_data.items() if value}
         for key, value in update_data.items():
             setattr(employee, key, value)
         
-        db.session.commit()
-        
-        return update_data
+        db.session.commit()      
+        return "Data update successfully"
 
 
 @app.route('/delete_employee', methods=["GET"])
