@@ -3,6 +3,7 @@ import psycopg2
 from flask_sqlalchemy import SQLAlchemy 
 from sqlalchemy.exc import SQLAlchemyError
 import os
+from functools import wraps
 
 db = os.getenv('DB')
 username = os.getenv('DB_USER')
@@ -24,8 +25,19 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False  # Optional but recommended
 
 db = SQLAlchemy(app)
 
+def handle_exceptions(route_function):
+    @wraps(route_function)
+    def decorated_function(*args, **kwargs):
+        try:
+            return route_function(*args, **kwargs)
+        except SQLAlchemyError as e:
+            error_message = f"Error retrieving employees: {str(e)}"
+        return (error_message)
+    return decorated_function
+
 
 @app.route("/connect_psql" , methods =["POST" , "GET"])
+@handle_exceptions
 def sql_connection():
     cur = conn.cursor() 
     cur.execute('''select * from students''')
@@ -33,37 +45,30 @@ def sql_connection():
     conn.commit() 
     cur.close() 
     conn.close()
-    return render_template('index.html' , data=data)
+    return data
 
 
-@app.route("/addnumber")
-def add_number():
-    return render_template('add.html')
-
-@app.route("/addnumber", methods=["POST"])
+@app.route("/addnumber", methods=["GET"])
+@handle_exceptions
 def calculate_sum():
-    num1 = request.form.get('num1')
-    num2 = request.form.get('num2')
-    try:
-        result = int(num1) + int(num2)
-        return render_template('add.html',add=result)
-    except ValueError:
-        return 'Please enter valid numbers'
+        nums = request.get_json()
+        result = int(nums['num1']) + int(nums['num2'])
+        return f"{nums['num1']} + {nums['num1']} = {result}"
 
-@app.route('/bankdata' , methods = ["POST" , "GET"])
+@app.route('/bankdata' , methods = ["GET"])
+@handle_exceptions
 def bankdata():
-    if request.method == 'POST':
-        data = request.get_json()  
-        compute_value = 0
-        if data[0]['mode'] == 'deposit':
-            compute_value = data[0]['net_amount'] + data[0]['amount']
-        else:
-            compute_value = data[0]['net_amount'] - data[0]['amount']
+        data = request.get_json()      
+        if 'mode' in data and 'net_amount' in data and 'amount' in data:
+            compute_value = 0
+            if data['mode'] == 'deposit':
+                compute_value = data['net_amount'] + data['amount']
+            else:
+                compute_value = data['net_amount'] - data['amount']
 
-        return jsonify({"net_amount": compute_value})
-    else:
-        return jsonify({"error": "Invalid JSON format or net_amount not found"})
-    
+            return jsonify({"net_amount": compute_value})
+        else:
+            return jsonify({"error": "Invalid JSON format or missing required fields"})
 
 class Employee(db.Model):
     __table_name__ = 'employee'
@@ -84,8 +89,8 @@ class Employee(db.Model):
 
 
 @app.route('/employees', methods=['GET'])
+@handle_exceptions
 def get_employees():
-    try:
         employees = Employee.query.all()
         result = []
         for employee in employees:
@@ -99,13 +104,10 @@ def get_employees():
                 'hire_date': str(employee.hire_date)
             })
         return result
-    except SQLAlchemyError as e:
-        error_message = f"Error retrieving employees: {str(e)}"
-        return (error_message)
 @app.route('/add_employee', methods=["GET"])
+@handle_exceptions
 def add_employee():
-    values = request.get_json()
-    try:
+        values = request.get_json()
         new_employee = Employee(
             first_name=values['firstname'],
             last_name=values['lastname'],
@@ -117,34 +119,31 @@ def add_employee():
         db.session.add(new_employee)
         db.session.commit()
         return jsonify("Data insert successfully")
-    except SQLAlchemyError as e:
-        error_message = f"Error retrieving employees: {str(e)}"
-        return (error_message)
 
 @app.route('/update_employee', methods=["GET"])
+@handle_exceptions
 def update_employee():
-    try:
         form_data = request.get_json() 
-        employee = Employee.query.filter(Employee.employee_id == form_data['id']).first()
+        employee_id  = form_data['id']
+        employee_name = form_data['firstname']
+        employee = Employee.query.filter_by(employee_id,employee_name).first()
         if not employee:
             return jsonify({'message': 'Employee not found'}), 404
+        else:
+            print(employee)
      
-        update_data = {key: value for key, value in form_data.items()}
+        update_data = {key: value for key, value in form_data.items() if value}
         for key, value in update_data.items():
             setattr(employee, key, value)
         
         db.session.commit()
         
-        return jsonify({'success': 'data updated successfully'})
-
-    except SQLAlchemyError as e:
-        db.session.rollback()  # Rollback changes in case of an error
-        return jsonify({'error': str(e)}), 500  
+        return update_data
 
 
 @app.route('/delete_employee', methods=["GET"])
+@handle_exceptions
 def delete_employee():
-    try:
         delete_values = request.get_json()
 
         employee_to_delete = (
@@ -157,13 +156,6 @@ def delete_employee():
         db.session.delete(employee_to_delete)
         db.session.commit()
         return "Data deleted successfully"
-
-    except SQLAlchemyError as e:
-        # Handle the SQLAlchemyError exception here
-        db.session.rollback()  # Roll back changes in case of an error
-        error_message = "An error occurred: {}".format(str(e))
-        # You can log the error or handle it in a way suitable for your application
-        return (error_message)
 
 
 if __name__ == "__main__":
